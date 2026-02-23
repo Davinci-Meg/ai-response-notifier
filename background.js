@@ -6,70 +6,69 @@
 // リクエスト/レスポンスの中身には一切アクセスしない。
 
 // --- サービス定義 ---
+// 各サービスのドメインへのPOSTリクエストで、
+// レスポンスに一定時間以上かかったものをAI応答と判定する。
+// URLパターンは広めに取り、短時間リクエストをフィルタすることで誤検出を防ぐ。
 const SERVICES = [
   {
     name: "Claude",
+    hostPattern: "claude.ai",
     urlPatterns: ["https://claude.ai/*"],
-    // completionエンドポイントへのPOSTを検出
-    matchRequest: (url, method) =>
-      method === "POST" && url.includes("completion"),
+    // 最低レスポンス時間（ms）。これ未満は無視
+    minDuration: 2000,
   },
   {
     name: "ChatGPT",
+    hostPattern: "chatgpt.com",
     urlPatterns: ["https://chatgpt.com/*"],
-    // conversation エンドポイントへのPOSTを検出
-    matchRequest: (url, method) =>
-      method === "POST" &&
-      (url.includes("/backend-api/conversation") ||
-        url.includes("/backend-conversation")),
+    minDuration: 2000,
   },
   {
     name: "Gemini",
+    hostPattern: "gemini.google.com",
     urlPatterns: ["https://gemini.google.com/*"],
-    // Gemini の streaming generate エンドポイントを検出
-    matchRequest: (url, method) =>
-      method === "POST" &&
-      (url.includes("StreamGenerate") ||
-        url.includes("generate") ||
-        url.includes("assistant.lamda")),
+    minDuration: 2000,
   },
 ];
 
 // 全サービスのURLパターン
 const ALL_URL_PATTERNS = SERVICES.flatMap((s) => s.urlPatterns);
 
-// リクエストからサービスを特定
-function detectService(url, method) {
+// URLからサービスを特定
+function detectService(url) {
   for (const service of SERVICES) {
-    if (service.matchRequest(url, method)) {
-      return service.name;
+    if (url.includes(service.hostPattern)) {
+      return service;
     }
   }
   return null;
 }
 
 // 進行中のリクエストを追跡
-// key: requestId, value: { tabId, startTime, serviceName }
+// key: requestId, value: { tabId, startTime, service }
 const pendingRequests = new Map();
+
+// タブごとの最新通知タイマー（連続通知を防ぐデバウンス）
+// key: tabId, value: timeoutId
+const tabDebounce = new Map();
 
 // 通知IDとタブIDの紐付け
 // key: notificationId, value: tabId
 const notificationTabMap = new Map();
 
-// --- リクエスト開始を検出 ---
+// --- POSTリクエストの開始を検出 ---
 chrome.webRequest.onBeforeRequest.addListener(
   (details) => {
-    const serviceName = detectService(details.url, details.method);
-    if (serviceName) {
-      console.log(
-        `[AI Notifier] [${serviceName}] リクエスト開始: ${details.requestId} (tab: ${details.tabId})`
-      );
-      pendingRequests.set(details.requestId, {
-        tabId: details.tabId,
-        startTime: Date.now(),
-        serviceName,
-      });
-    }
+    if (details.method !== "POST") return;
+
+    const service = detectService(details.url);
+    if (!service) return;
+
+    pendingRequests.set(details.requestId, {
+      tabId: details.tabId,
+      startTime: Date.now(),
+      service,
+    });
   },
   { urls: ALL_URL_PATTERNS }
 );
@@ -82,17 +81,30 @@ chrome.webRequest.onCompleted.addListener(
 
     pendingRequests.delete(details.requestId);
     const elapsed = Date.now() - pending.startTime;
+
+    // 短いリクエストは無視（メタデータ等のAPI呼び出し）
+    if (elapsed < pending.service.minDuration) return;
+
     console.log(
-      `[AI Notifier] [${pending.serviceName}] リクエスト完了: ${details.requestId} (${elapsed}ms)`
+      `[AI Notifier] [${pending.service.name}] リクエスト完了 (${elapsed}ms, tab: ${pending.tabId})`
     );
 
-    // 短すぎるリクエストは無視
-    if (elapsed < 1000) {
-      console.log("[AI Notifier] 短時間リクエストのためスキップ");
-      return;
+    // デバウンス: 同じタブで連続する完了イベントをまとめる
+    // （1つの応答で複数のAPIリクエストが発生する場合がある）
+    const tabId = pending.tabId;
+    const serviceName = pending.service.name;
+
+    if (tabDebounce.has(tabId)) {
+      clearTimeout(tabDebounce.get(tabId));
     }
 
-    checkTabAndNotify(pending.tabId, pending.serviceName);
+    tabDebounce.set(
+      tabId,
+      setTimeout(() => {
+        tabDebounce.delete(tabId);
+        checkTabAndNotify(tabId, serviceName);
+      }, 1000)
+    );
   },
   { urls: ALL_URL_PATTERNS }
 );
