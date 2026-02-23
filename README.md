@@ -1,4 +1,4 @@
-# 🔔 AI Chat Response Notifier
+# 🔔 AI Response Notifier
 
 A Chrome extension that sends you a desktop notification when **Claude**, **ChatGPT**, or **Gemini** finishes generating a response — so you never miss a reply while working in another tab.
 

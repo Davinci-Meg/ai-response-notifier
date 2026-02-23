@@ -1,4 +1,4 @@
-# 🔔 AI Chat Response Notifier
+# 🔔 AI Response Notifier
 
 **Claude**・**ChatGPT**・**Gemini** の応答生成が完了したときにデスクトップ通知を送るChrome拡張機能です。別のタブで作業中でも返信を見逃しません。
 
