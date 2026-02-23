@@ -6,6 +6,8 @@ A Chrome extension that sends you a desktop notification when Claude (claude.ai)
 ![Manifest V3](https://img.shields.io/badge/Manifest-V3-green)
 ![License](https://img.shields.io/badge/License-MIT-yellow)
 
+> 🌐 [日本語](README.ja.md)
+
 ## ✨ Features
 
 - **Auto-detect completion** — Monitors when Claude finishes responding using the `webRequest` API
